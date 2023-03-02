@@ -1,16 +1,15 @@
 import logging
 import os
+import sys
+import time
+from http import HTTPStatus
+from json import JSONDecodeError
 
 import requests
-
 import telegram
-import time
-
 from dotenv import load_dotenv
 
-import sys
-
-from http import HTTPStatus
+from exceptions import HTTPRequestError, ParseStatusError
 
 load_dotenv()
 
@@ -23,10 +22,11 @@ RETRY_PERIOD = 600
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
-# logging.basicConfig(
-#     level=logging.DEBUG,
-#     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-#     stream=sys.stdout)
+HOMEWORK_VERDICTS = {
+    'approved': 'Работа проверена: ревьюеру всё понравилось. Ура!',
+    'reviewing': 'Работа взята на проверку ревьюером.',
+    'rejected': 'Работа проверена: у ревьюера есть замечания.'
+}
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -36,13 +36,6 @@ formatter = logging.Formatter(
 )
 handler.setFormatter(formatter)
 logger.addHandler(handler)
-
-
-HOMEWORK_VERDICTS = {
-    'approved': 'Работа проверена: ревьюеру всё понравилось. Ура!',
-    'reviewing': 'Работа взята на проверку ревьюером.',
-    'rejected': 'Работа проверена: у ревьюера есть замечания.'
-}
 
 
 def check_tokens():
@@ -74,16 +67,13 @@ def get_api_answer(timestamp):
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=payload)
         if response.status_code != HTTPStatus.OK:
-            logging.error(f'Ошибка {response.status_code}')
-            raise Exception(f'Ошибка {response.status_code}')
+            raise HTTPRequestError(response)
     except Exception as error:
-        logging.error(f'Ошибка при запросе к основному API: {error}')
         raise Exception(f'Ошибка при запросе к основному API: {error}')
     try:
         return(response.json())
-    except ValueError:
-        logger.error('Ошибка парсинга ответа из формата json')
-        raise ValueError('Ошибка парсинга ответа из формата json')
+    except JSONDecodeError as error:
+        raise error('Ошибка парсинга ответа из формата json')
 
 
 def check_response(response):
@@ -98,12 +88,10 @@ def check_response(response):
     try:
         list_homeworks = response['homeworks']
     except KeyError:
-        logger.error('Ошибка словаря по ключу homeworks')
         raise KeyError('Ошибка словаря по ключу homeworks')
     try:
         homework = list_homeworks[0]
     except IndexError:
-        logger.error('Список домашних работ пуст')
         raise IndexError('Список домашних работ пуст')
     return homework
 
@@ -117,11 +105,11 @@ def parse_status(homework):
     if 'homework_name' not in homework:
         raise KeyError('Отсутствует ключ "homework_name" в ответе API')
     if 'status' not in homework:
-        raise Exception('Отсутствует ключ "status" в ответе API')
+        raise KeyError('Отсутствует ключ "status" в ответе API')
     homework_name = homework['homework_name']
     homework_status = homework['status']
     if homework_status not in HOMEWORK_VERDICTS:
-        raise Exception(f'Неизвестный статус работы: {homework_status}')
+        raise ParseStatusError(homework_status)
     verdict = HOMEWORK_VERDICTS[homework_status]
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
@@ -146,9 +134,8 @@ def main():
                     send_message(bot, new_status)
                     status = new_status
         except Exception as error:
-            logger.error(f'Сбой в работе программы: {error}')
             message = f'Сбой в работе программы: {error}'
-            if message not in error_message and message is True:
+            if message not in error_message and message:
                 error_message = message
                 send_message(bot, message)
                 logger.error(message)
