@@ -23,9 +23,9 @@ ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
 HOMEWORK_VERDICTS = {
-    'approved': 'Работа проверена: ревьюеру всё понравилось. Ура!',
-    'reviewing': 'Работа взята на проверку ревьюером.',
-    'rejected': 'Работа проверена: у ревьюера есть замечания.'
+    'approved': 'Work has been reviewed: the reviewer liked everything. Hooray!',
+    'reviewing': 'The work is under review by the reviewer.',
+    'rejected': 'Work has been reviewed: the reviewer has some comments.'
 }
 
 logger = logging.getLogger(__name__)
@@ -39,86 +39,69 @@ logger.addHandler(handler)
 
 
 def check_tokens():
-    """Проверяет доступность переменных окружения."""
     if all([PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID]):
         return True
 
 
 def send_message(bot, message):
-    """Отправляет сообщение в Telegram чат."""
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
         logger.debug(
-            f'Отправлено сообщение в чат {TELEGRAM_CHAT_ID}: {message}'
+            f'A message has been sent in the chat {TELEGRAM_CHAT_ID}: {message}'
         )
     except telegram.TelegramError as error:
-        logger.error(f'Ошибка Telegram: {error}')
+        logger.error(f'Telegram error: {error}')
     except Exception:
-        logger.error('Ошибка отправки сообщения в чат')
+        logger.error('Error sending a message in the chat')
 
 
 def get_api_answer(timestamp):
-    """Делает запрос к эндпоинту API-сервиса.
-    В качестве параметра функция получает временную метку.
-    В случае успешного запроса должна вернуть ответ API,
-    преобразовав его из формата JSON к типам данных Python.
-    """
     payload = {'from_date': timestamp}
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=payload)
         if response.status_code != HTTPStatus.OK:
             raise HTTPRequestError(response)
     except Exception as error:
-        raise Exception(f'Ошибка при запросе к основному API: {error}')
+        raise Exception(f'Error when making a request to the main API: {error}')
     try:
         return(response.json())
     except JSONDecodeError as error:
-        raise error('Ошибка парсинга ответа из формата json')
+        raise error('Error parsing the response from the JSON format')
 
 
 def check_response(response):
-    """Проверяет ответ API на корректность.
-    Если ответ API соответствует ожиданиям, то функция должна вернуть
-    список домашних работ, доступный в ответе API по ключу 'homeworks'
-    """
     if not isinstance(response, dict):
-        raise TypeError('Тип ответа API отличен от словаря')
+        raise TypeError('The API response type is different from a dictionary')
     if not isinstance(response.get('homeworks'), list):
-        raise TypeError('В ответе API данные приходят не в виде списка.')
+        raise TypeError('The API response data is not in the form of a list.')
     try:
         list_homeworks = response['homeworks']
     except KeyError:
-        raise KeyError('Ошибка словаря по ключу homeworks')
+        raise KeyError('Dictionary error for the key 'homeworks'')
     try:
         homework = list_homeworks[0]
     except IndexError:
-        raise IndexError('Список домашних работ пуст')
+        raise IndexError('The list of homework assignments is empty')
     return homework
 
 
 def parse_status(homework):
-    """Извлекает статус домашней работы.
-    В качестве параметра функция получает один элемент из списка домашних
-    работ. В случае успеха, функция возвращает подготовленную для отправки в
-    Telegram строку, содержащую один из вердиктов словаря HOMEWORK_VERDICTS.
-    """
     if 'homework_name' not in homework:
-        raise KeyError('Отсутствует ключ "homework_name" в ответе API')
+        raise KeyError('The 'homework_name' key is missing in the API response')
     if 'status' not in homework:
-        raise KeyError('Отсутствует ключ "status" в ответе API')
+        raise KeyError('The 'status' key is missing in the API response')
     homework_name = homework['homework_name']
     homework_status = homework['status']
     if homework_status not in HOMEWORK_VERDICTS:
         raise ParseStatusError(homework_status)
     verdict = HOMEWORK_VERDICTS[homework_status]
-    return f'Изменился статус проверки работы "{homework_name}". {verdict}'
+    return f'The status of the work "{homework_name}" review has changed. {verdict}'
 
 
 def main():
-    """Основная логика работы бота."""
     if not check_tokens():
-        logger.critical('Отсутствуют переменные окружения')
-        sys.exit('Отсутствуют переменные окружения')
+        logger.critical('Environment variables are missing')
+        sys.exit('Environment variables are missing')
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
     error_message = ''
@@ -134,7 +117,7 @@ def main():
                     send_message(bot, new_status)
                     status = new_status
         except Exception as error:
-            message = f'Сбой в работе программы: {error}'
+            message = f'Program malfunction: {error}'
             if message not in error_message and message:
                 error_message = message
                 send_message(bot, message)
